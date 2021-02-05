@@ -103,13 +103,21 @@ def get_sku_title():
     return sku_title[0]
 
 def send_wechat(message):
-    """推送信息到微信"""
-    url = 'http://sc.ftqq.com/{}.send'.format(global_config.getRaw('messenger', 'sckey'))
-    payload = {
-        "text":'抢购结果',
-        "desp": message
-    }
+    # """推送信息到微信"""
+    # url = 'http://sc.ftqq.com/{}.send'.format(global_config.getRaw('messenger', 'sckey'))
+    # payload = {
+    #     "text":'抢购结果',
+    #     "desp": message
+    # }
+    # headers = {
+    #     'User-Agent':global_config.getRaw('config', 'DEFAULT_USER_AGENT')
+    # }
+    # requests.get(url, params=payload, headers=headers)
+    url = "https://oapi.dingtalk.com/robot/send?access_token=7fe2a0a70db700e4c47879aeddd7659d3cca3c42a711ac1c939ec26064fa2dfd"
+
+    payload = "{\"msgtype\":\"text\",\"text\":{\"content\":\"pdwjun: " + message + "\"}}"
     headers = {
-        'User-Agent':global_config.getRaw('config', 'DEFAULT_USER_AGENT')
+        'Content-Type': 'application/json'
     }
-    requests.get(url, params=payload, headers=headers)
+
+    requests.request("POST", url, headers=headers, data=payload.encode('utf-8').decode('latin-1'))

@@ -4,8 +4,9 @@ import time
 from jdlogger import logger
 from timer import Timer
 import requests
-from util import parse_json, get_session, get_sku_title,send_wechat
+from util import parse_json, get_session, get_sku_title, send_wechat
 from config import global_config
+
 
 class Jd_Mask_Spider(object):
     def __init__(self):
@@ -96,37 +97,55 @@ class Jd_Mask_Spider(object):
         这里返回第一次跳转后的页面url，作为商品的抢购链接
         :return: 商品的抢购链接
         """
-        url = 'https://itemko.jd.com/itemShowBtn'
+
+        url = 'https://item-soa.jd.com/getWareBusiness'
+
         payload = {
             'callback': 'jQuery{}'.format(random.randint(1000000, 9999999)),
             'skuId': self.sku_id,
-            'from': 'pc',
             '_': str(int(time.time() * 1000)),
         }
         headers = {
             'User-Agent': self.default_user_agent,
-            'Host': 'itemko.jd.com',
-            'Referer': 'https://item.jd.com/{}.html'.format(self.sku_id),
+            # 'Host': 'item-soa.jd.com',
+            'Referer': 'https://item.jd.com/',
+            'authority': 'item-soa.jd.com',
+            'scheme': 'https',
+            'method': 'GET',
+            'num': '1',
+            'path': '/getWareBusiness?callback=' + payload['callback'] + '&skuId=' + self.sku_id,
         }
-        while True:
+        tryTime = 0
+        while True and tryTime < 20:
+            # self.session.mount('https://cart.jd.com/', HTTP20Adapter())
+            # 加购物车
             resp = self.session.get(url=url, headers=headers, params=payload)
             resp_json = parse_json(resp.text)
-            if resp_json.get('url'):
+            yuyueInfo = resp_json.get('yuyueInfo')
+            if yuyueInfo is not None and yuyueInfo.get('state') == 4:
+                cookies = self.session.cookies
+                url = 'https://cart.jd.com/gate.action?pcount=1&ptype=1&pid=' + self.sku_id
+                resp = requests.get(url, cookies=cookies)
+                return resp.url
+
                 # https://divide.jd.com/user_routing?skuId=8654289&sn=c3f4ececd8461f0e4d7267e96a91e0e0&from=pc
-                router_url = 'https:' + resp_json.get('url')
-                # https://marathon.jd.com/captcha.html?skuId=8654289&sn=c3f4ececd8461f0e4d7267e96a91e0e0&from=pc
-                seckill_url = router_url.replace(
-                    'divide', 'marathon').replace(
-                    'user_routing', 'captcha.html')
-                logger.info("抢购链接获取成功: %s", seckill_url)
-                return seckill_url
+                # router_url = 'https:' + resp_json.get('url')
+                # # https://marathon.jd.com/captcha.html?skuId=8654289&sn=c3f4ececd8461f0e4d7267e96a91e0e0&from=pc
+                # seckill_url = router_url.replace(
+                #     'divide', 'marathon').replace(
+                #     'user_routing', 'captcha.html')
+                # logger.info("抢购链接获取成功: %s", seckill_url)
+                # return seckill_url
             else:
-                logger.info("抢购链接获取失败，%s不是抢购商品或抢购页面暂未刷新，1秒后重试")
-                time.sleep(1)
+                logger.info("抢购链接获取失败，%s不是抢购商品或抢购页面暂未刷新，0.1秒后重试")
+                time.sleep(0.2)
+
+            tryTime = tryTime + 1
 
     def request_seckill_url(self):
         """访问商品的抢购链接（用于设置cookie等"""
         logger.info('用户:{}'.format(self.get_username()))
+        logger.info('sku_id:{}'.format(self.sku_id))
         logger.info('商品名称:{}'.format(get_sku_title()))
         self.timers.start()
         self.seckill_url[self.sku_id] = self.get_seckill_url()
@@ -144,19 +163,18 @@ class Jd_Mask_Spider(object):
 
     def request_seckill_checkout_page(self):
         """访问抢购订单结算页面"""
-        logger.info('访问抢购订单结算页面...')
-        url = 'https://marathon.jd.com/seckill/seckill.action'
-        payload = {
-            'skuId': self.sku_id,
-            'num': 1,
-            'rid': int(time.time())
-        }
+        url = 'https://trade.jd.com/shopping/dynamic/coupon/getCoupons.action'
+
         headers = {
             'User-Agent': self.default_user_agent,
-            'Host': 'marathon.jd.com',
-            'Referer': 'https://item.jd.com/{}.html'.format(self.sku_id),
+            'Host': 'trade.jd.com',
+            'Referer': 'https://trade.jd.com/shopping/order/getOrderInfo.action',
+            'authority': 'trade.jd.com',
+            'scheme': 'https',
+            'method': 'POST',
+            'path': '/shopping/dynamic/coupon/getCoupons.action',
         }
-        self.session.get(url=url, params=payload, headers=headers)
+        self.session.get(url=url, headers=headers)
 
     def _get_seckill_init_info(self):
         """获取秒杀初始化信息（包括：地址，发票，token）
@@ -174,6 +192,8 @@ class Jd_Mask_Spider(object):
             'Host': 'marathon.jd.com',
         }
         resp = self.session.post(url=url, data=data, headers=headers)
+
+        logger.info(resp.text)
         return parse_json(resp.text)
 
     def _get_seckill_order_data(self):
@@ -228,24 +248,44 @@ class Jd_Mask_Spider(object):
         """提交抢购（秒杀）订单
         :return: 抢购结果 True/False
         """
-        url = 'https://marathon.jd.com/seckillnew/orderService/pc/submitOrder.action'
+        # url = 'https://marathon.jd.com/seckillnew/orderService/pc/submitOrder.action'
+        url = 'https://trade.jd.com/shopping/order/submitOrder.action'
         payload = {
             'skuId': self.sku_id,
+            'submitOrderParam.payPassword': 'u34u36u37u39u31u38',
+            'vendorRemarks': '[{"venderId":"715322","remark":""}]',
+            'submitOrderParam.sopNotPutInvoice': 'true',
+            'submitOrderParam.trackID': 'TestTrackId',
+            'submitOrderParam.ignorePriceChange': '0',
+            'submitOrderParam.btSupport': '0',
+            'submitOrderParam.eid': 'IFFL6KCM7GNWKEF7QYJWY7GV6N5TDO3XY32JXHQYGXVRSU37R7XXMVOGMB55UONBL657M5JEAKFPNLWJVO7MP6RQCI',
+            'submitOrderParam.fp': 'f8796ac2de74f27aa2279ebd189d5121',
+            'submitOrderParam.jxj': '1',
         }
-        self.seckill_order_data[self.sku_id] = self._get_seckill_order_data(
-            )
-        logger.info('提交抢购订单...')
+        sec_kill_order_data = self._get_seckill_order_data(
+        )
+        # logger.info('提交抢购订单...')
         headers = {
             'User-Agent': self.default_user_agent,
-            'Host': 'marathon.jd.com',
-            'Referer': 'https://marathon.jd.com/seckill/seckill.action?skuId={0}&num={1}&rid={2}'.format(
-                self.sku_id, 1, int(time.time())),
+            'Host': 'trade.jd.com',
+            'Referer': 'https://trade.jd.com/shopping/order/getOrderInfo.action',
+            'authority': 'trade.jd.com',
+            'scheme': 'https',
+            'method': 'POST',
+            'path': '/shopping/order/submitOrder.action?',
+            # 'sec-fetch-dest:': 'empty',
+            # 'sec-fetch-mode:': 'cors',
+            # 'sec-fetch-site:': 'same-origin',
         }
+        # self.session.mount('https://trade.jd.com/', HTTP20Adapter())
+
+        # resp = requests.post(url, cookies=self.session.cookies, headers=headers, params=payload, data=.seckill_order_data.get(
+        #         self.sku_id))
+
         resp = self.session.post(
             url=url,
             params=payload,
-            data=self.seckill_order_data.get(
-                self.sku_id),
+            data=sec_kill_order_data,
             headers=headers)
         resp_json = parse_json(resp.text)
         # 返回信息
@@ -257,13 +297,79 @@ class Jd_Mask_Spider(object):
         # {"appUrl":"xxxxx","orderId":820227xxxxx,"pcUrl":"xxxxx","resultCode":0,"skuId":0,"success":true,"totalMoney":"xxxxx"}
         if resp_json.get('success'):
             order_id = resp_json.get('orderId')
-            total_money = resp_json.get('totalMoney')
-            pay_url = 'https:' + resp_json.get('pcUrl')
+            # total_money = resp_json.get('totalMoney')
+            # pay_url = 'https:' + resp_json.get('pcUrl')
             logger.info(
-                '抢购成功，订单号:{}, 总价:{}, 电脑端付款链接:{}'.format(order_id,total_money,pay_url)
-                )
+                '抢购成功，需要手动支付，订单号:{}'.format(order_id)
+            )
             if global_config.getRaw('messenger', 'enable') == 'true':
-                success_message = "抢购成功，订单号:{}, 总价:{}, 电脑端付款链接:{}".format(order_id, total_money, pay_url)
+                success_message = "抢购成功，需要手动支付，订单号:{}, 商品:{}".format(order_id, get_sku_title())
+                send_wechat(success_message)
+            return True
+        else:
+            logger.info('抢购失败，返回信息:{}'.format(resp_json))
+            if global_config.getRaw('messenger', 'enable') == 'true':
+                error_message = '抢购失败，返回信息:{}'.format(resp_json)
+                send_wechat(error_message)
+            return False
+
+    def mobile_submit_order(self):
+        # 手机端提交订单
+        url = 'https://fo.m.jd.com/m/pay/payWithCheckOut'
+        payload = {
+            'skuId': self.sku_id,
+            'skuNum': 1,
+            'addressId': 1405661826,
+            'type': 2,
+            'payType': 1,
+        }
+        # sec_kill_order_data = self._get_seckill_order_data(
+        # )
+        # logger.info('提交抢购订单...')
+        headers = {
+            'User-Agent': self.default_user_agent,
+            # 'Host': 'trade.jd.com',
+            'Referer': 'https://fo.m.jd.com/m/settlement/payMiddle?skuId=' + self.sku_id + 'subPrice=0&notiPrice=0&expectingPrice=0&expireDate=undefined&type=2',
+            'authority': 'fo.m.jd.com',
+            'scheme': 'https',
+            'method': 'POST',
+            'path': '/m/pay/payWithCheckOut',
+            # 'sec-fetch-dest:': 'empty',
+            # 'sec-fetch-mode:': 'cors',
+            # 'sec-fetch-site:': 'same-origin',
+        }
+        # self.session.mount('https://trade.jd.com/', HTTP20Adapter())
+
+        # resp = requests.post(url, cookies=self.session.cookies, headers=headers, params=payload, data=.seckill_order_data.get(
+        #         self.sku_id))
+
+        logger.info('用户:{}'.format(self.get_username()))
+        logger.info('sku_id:{}'.format(self.sku_id))
+        logger.info('商品名称:{}'.format(get_sku_title()))
+        self.timers.start()
+
+        resp = self.session.post(
+            url=url,
+            params=payload,
+            # data=sec_kill_order_data,
+            headers=headers)
+        resp_json = parse_json(resp.text)
+        # 返回信息
+        # 抢购失败：
+        # {'errorMessage': '很遗憾没有抢到，再接再厉哦。', 'orderId': 0, 'resultCode': 60074, 'skuId': 0, 'success': False}
+        # {'errorMessage': '抱歉，您提交过快，请稍后再提交订单！', 'orderId': 0, 'resultCode': 60017, 'skuId': 0, 'success': False}
+        # {'errorMessage': '系统正在开小差，请重试~~', 'orderId': 0, 'resultCode': 90013, 'skuId': 0, 'success': False}
+        # 抢购成功：
+        # {"appUrl":"xxxxx","orderId":820227xxxxx,"pcUrl":"xxxxx","resultCode":0,"skuId":0,"success":true,"totalMoney":"xxxxx"}
+        if resp_json.get('success'):
+            order_id = resp_json.get('orderId')
+            # total_money = resp_json.get('totalMoney')
+            # pay_url = 'https:' + resp_json.get('pcUrl')
+            logger.info(
+                '抢购成功，需要手动支付，订单号:{}'.format(order_id)
+            )
+            if global_config.getRaw('messenger', 'enable') == 'true':
+                success_message = "抢购成功，需要手动支付，订单号:{}, 商品:{}".format(order_id, get_sku_title())
                 send_wechat(success_message)
             return True
         else:
