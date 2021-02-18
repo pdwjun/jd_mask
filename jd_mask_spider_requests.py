@@ -353,6 +353,7 @@ class Jd_Mask_Spider(object):
             params=payload,
             # data=sec_kill_order_data,
             headers=headers)
+        logger.info(resp.text)
         resp_json = parse_json(resp.text)
         # 返回信息
         # 抢购失败：
